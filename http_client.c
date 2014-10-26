@@ -88,13 +88,15 @@ int main(void)
 	int found = 0;
 	for (int i = 0; i < NRREQUESTS; ++i)
 	{ 
-	  found = (msg->easy_handle == handles[i]);
-	  if (found)
+	  if (msg->easy_handle == handles[i])
+	  {
+	    found = i + 1;
 	    break;
+	  }
 	}
 	if (found)
 	{
-	  printf("HTTP transfer completed with status %d\n", msg->data.result);
+	  printf("HTTP transfer #%d completed with status %d\n", found, msg->data.result);
 	  --running;
 	}
 	else
