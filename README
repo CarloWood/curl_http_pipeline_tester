@@ -39,8 +39,8 @@ EXPLANATION
 -----------
 
 The http_server listens on port 9000 and accepts any number of connections.
-Each connection is full HTTP pipeline capable http server (version 1.1),
-that is - it deal correctly with whatever http_client is feeding it ;).
+Each connection is full HTTP pipeline capable (version 1.1), that is - it deals
+correctly with whatever http_client is feeding it ;).
 
 The client sends (multiple) requests (without waiting for replies) of the form:
 
@@ -84,12 +84,13 @@ LIBCURL BUGS
 In order of importance,
 
 - At the end of this applicaiton While a request is timing out, libcurl
-  starts to return from curl_multi_perform() immediately, while curl_multi_fdset()
-  keeps returning a bit set on the fdread set. At this point there is
-  activity on this socket, but libcurl doesn't read that.
+  starts to return from curl_multi_perform() immediately, while
+  curl_multi_fdset() keeps returning a bit set on the fdread set. At this
+  point there is activity on this socket, but libcurl doesn't read that.
   The result is select() immediately returns, and get into a tight loop
   of the main loop, calling curl_multi_perform() / curl_multi_fdset() / select()
-  10,000 times per second (until finally the 4 seconds of CURLOPT_TIMEOUT did pass).
+  10,000 times per second (until finally the 4 seconds of CURLOPT_TIMEOUT
+  did pass).
 
 - The http_client application first sends a single requests and waits for
   a reply. This is necessary because if we start immediately with sending
