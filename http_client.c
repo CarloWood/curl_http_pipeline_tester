@@ -1,3 +1,5 @@
+#define _BSD_SOURCE
+#include <sys/time.h>	// timersub, timercmp
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
@@ -8,6 +10,92 @@
 // All easy handles are pre-prepared in advance.
 // This specifies the total number of requests / easy handles that the application will do in total.
 #define NRREQUESTS 32
+
+void print_time_prefix()
+{
+  struct timeval tv;
+  time_t nowtime;
+  struct tm *nowtm;
+  char tmbuf[64], buf[80];
+
+  gettimeofday(&tv, NULL);
+  nowtime = tv.tv_sec;
+  nowtm = localtime(&nowtime);
+  strftime(tmbuf, sizeof tmbuf, "%Y-%m-%d %H:%M:%S", nowtm);
+  snprintf(buf, sizeof buf, "%s.%06u: ", tmbuf, tv.tv_usec);
+
+  static int notfirst = 0;
+  static struct timeval last_tv;
+
+  if (!notfirst)
+    notfirst = 1;
+  else
+  {
+    static struct timeval mindiff = { 0, 50000 };
+    struct timeval diff;
+    timersub(&tv, &last_tv, &diff);
+    if (timercmp(&diff, &mindiff, >))
+    {
+      printf("<... %u.%06u seconds ...>\n", diff.tv_sec, diff.tv_usec);
+    }
+  }
+  printf("%s: ", buf);
+
+  last_tv = tv;
+}
+
+void add_next_handle(CURLM* multi_handle, CURL* handles[], int* added, int* running)
+{
+  curl_multi_add_handle(multi_handle, handles[*added]);
+  ++*added;
+  ++*running;
+  print_time_prefix();
+  printf("Request #%d    added [now running: %d]\n", *added, *running);
+}
+
+void process_results(CURLM* multi_handle, CURL* handles[], int* running)
+{
+  CURLMsg* msg;
+  int msgs_left;
+  while ((msg = curl_multi_info_read(multi_handle, &msgs_left)))
+  {
+    if (msg->msg == CURLMSG_DONE)
+    {
+      // Find out which handle this message is about.
+      int found = 0;
+      for (int i = 0; i < NRREQUESTS; ++i)
+      {
+	if (msg->easy_handle == handles[i])
+	{
+	  found = i + 1;
+	  break;
+	}
+      }
+      if (found)
+      {
+	print_time_prefix();
+	if (msg->data.result == 28)
+	{
+	  printf("Request    #%d TIMED OUT!", found);
+	}
+	else if (msg->data.result == 0)
+	{
+	  printf("Request    #%d finished", found);
+	}
+	else
+	{
+	  printf("Request    #%d completed with status %d", found, msg->data.result);
+	}
+	--*running;
+	printf(" [now running: %d]\n", *running);
+      }
+      else
+      {
+	printf("Got CURLMSG_DONE for a msg that matches none of our fds!");
+      }
+    }
+  }
+}
 
 int main(void)
 {
@@ -44,21 +132,22 @@ int main(void)
   // The number of actually added easy handles so far. It is (therefore) also used as index
   // to the handles[] array to read the next easy handle to add.
   int added = 0;
+  // This variable keeps track of how many easy handles were added (added) minus the number of finished.
+  // In other words, the number that is still running.
+  int running = 0;
 
   // Start with adding just one handle - until libcurl saw that it supports pipelining.
   // Otherwise it will create many connections - instead of 1.
-  curl_multi_add_handle(multi_handle, handles[added++]);
+  add_next_handle(multi_handle, handles, &added, &running);
+
   // Brute force let this finish.. it's not really important - just to make sure
   // that libcurl start to do pipelining for this url.
   int still_running;
   do { curl_multi_perform(multi_handle, &still_running); } while (still_running);
+  process_results(multi_handle, handles, &running);
 
   //==========================================================================================
   // THE REAL TEST STARTS HERE
-
-  // This variable keeps track of how many easy handles were added (added) minus the number of finished.
-  // In other words, the number that is still running.
-  int running = 0;
 
   // Run until nothing is running anymore.
   for (;;)
@@ -67,9 +156,7 @@ int main(void)
     for (int n = still_running; n < 6 && added < NRREQUESTS; ++n)
     {
       // Add the next (already prepared) easy handle.
-      printf("Adding request #%d\n", added + 1);
-      curl_multi_add_handle(multi_handle, handles[added++]);
-      ++running;
+      add_next_handle(multi_handle, handles, &added, &running);
     }
 
     // Call curl_multi_perform.
@@ -78,33 +165,7 @@ int main(void)
     printf("still_running = %d\n", still_running);
 
     // Print debug outout when anything finished, and update 'running'.
-    CURLMsg* msg;
-    int msgs_left;
-    while ((msg = curl_multi_info_read(multi_handle, &msgs_left)))
-    { 
-      if (msg->msg == CURLMSG_DONE)
-      { 
-	// Find out which handle this message is about.
-	int found = 0;
-	for (int i = 0; i < NRREQUESTS; ++i)
-	{ 
-	  if (msg->easy_handle == handles[i])
-	  {
-	    found = i + 1;
-	    break;
-	  }
-	}
-	if (found)
-	{
-	  printf("HTTP transfer #%d completed with status %d\n", found, msg->data.result);
-	  --running;
-	}
-	else
-	{
-	  printf("Got CURLMSG_DONE for a msg that matches none of our fds!");
-	}
-      }
-    }
+    process_results(multi_handle, handles, &running);
 
     // Exit the main loop when we're done.
     if (running == 0 &&		// all done
