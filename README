@@ -10,6 +10,10 @@ Next run:
 ./configure --enable-maintainer-mode
 make
 
+You need to have a C++ compiler and boost installed (and libcurl of course).
+PKG_CONFIG_PATH can be used to find and use a specific installation
+of libcurl, but don't forget to also set LD_LIBRARY_PATH correctly if
+you installed it in a non-standard place.
 
 RUNNING
 -------
