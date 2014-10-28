@@ -8,9 +8,11 @@
 #include <curl/curl.h>
 
 // The maximum number of requests in the pipeline.
-#define PIPELEN 4
+int const PIPELEN = 4;
 // This specifies the total number of requests (easy handles) that the application will do in total.
-#define NRREQUESTS (2 + 2 * PIPELEN)
+int const NRREQUESTS = 10;
+// Define this to get verbose output.
+int const VERBOSE = 0;
 
 void print_time_prefix()
 {
@@ -48,10 +50,10 @@ void print_time_prefix()
 void add_next_handle(CURLM* multi_handle, CURL* handles[], int* added, int* running)
 {
   curl_multi_add_handle(multi_handle, handles[*added]);
-  ++*added;
   ++*running;
   print_time_prefix();
   printf("Request #%d    added [now running: %d]\n", *added, *running);
+  ++*added;
 }
 
 void process_results(CURLM* multi_handle, CURL* handles[], struct curl_slist* headers[], int* running)
@@ -64,16 +66,16 @@ void process_results(CURLM* multi_handle, CURL* handles[], struct curl_slist* he
     {
       CURL* easy = msg->easy_handle;
       // Find out which handle this message is about.
-      int found = 0;
+      int found = -1;
       for (int i = 0; i < NRREQUESTS; ++i)
       {
 	if (easy == handles[i])
 	{
-	  found = i + 1;
+	  found = i;
 	  break;
 	}
       }
-      if (found)
+      if (found >= 0)
       {
 	print_time_prefix();
 	if (msg->data.result == 28)
@@ -89,7 +91,7 @@ void process_results(CURLM* multi_handle, CURL* handles[], struct curl_slist* he
 	  printf("Request    #%d completed with status %d", found, msg->data.result);
 	}
 	// Clean up the headers.
-	curl_slist_free_all(headers[found - 1]);
+	curl_slist_free_all(headers[found]);
 	--*running;
 	printf(" [now running: %d]\n", *running);
       }
@@ -120,16 +122,16 @@ int main(void)
   {
     handles[i] = curl_easy_init();
     curl_easy_setopt(handles[i], CURLOPT_STDERR, stdout);
-    curl_easy_setopt(handles[i], CURLOPT_VERBOSE, 1L);
+    curl_easy_setopt(handles[i], CURLOPT_VERBOSE, VERBOSE ? 1L : 0L);
     curl_easy_setopt(handles[i], CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(handles[i], CURLOPT_TIMEOUT, (i == 3) ? 10L : 1L);					// Timeout after 1 seconds.
     curl_easy_setopt(handles[i], CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(handles[i], CURLOPT_URL, "http://localhost:9000/");
     // Construct the headers.
-    snprintf(header_buf, sizeof header_buf, "X-Sleep: %d", (i + 1 != 2) ? 100 : 1100);	// Server delays reply 0.1 seconds except for request #2, which will be 1.1 seconds delayed.
+    snprintf(header_buf, sizeof header_buf, "X-Sleep: %d", (i != 1) ? 100 : 1100);	// Server delays reply 0.1 seconds except for request #1, which will be 1.1 seconds delayed.
     if (i > 0)	// No delay for the first one, which is just to establish that the server supports http pipelining.
       headers[i] = curl_slist_append(headers[i], header_buf);
-    snprintf(header_buf, sizeof header_buf, "X-Request: %d", i + 1);			// The requests are numbered 1 through NRREQUESTS.
+    snprintf(header_buf, sizeof header_buf, "X-Request: %d", i);			// The requests are numbered 0 through NRREQUESTS - 1.
     headers[i] = curl_slist_append(headers[i], header_buf);
     curl_easy_setopt(handles[i], CURLOPT_HTTPHEADER, headers[i]);
   }
@@ -165,9 +167,9 @@ int main(void)
     }
 
     // Call curl_multi_perform.
-    printf("Running curl_multi_perform() with %d requests in the pipeline.\n", running);
+    if (VERBOSE) printf("Running curl_multi_perform() with %d requests in the pipeline.\n", running);
     curl_multi_perform(multi_handle, &still_running);
-    printf("still_running = %d\n", still_running);
+    if (VERBOSE) printf("still_running = %d\n", still_running);
 
     // Print debug output when anything finished, and update 'running'.
     process_results(multi_handle, handles, headers, &running);
@@ -212,9 +214,9 @@ int main(void)
     int rc;
     do
     {
-      printf("select(%d, ..., %d s + %d us) = ", maxfd + 1, timeout.tv_sec, timeout.tv_usec);
+      if (VERBOSE) printf("select(%d, ..., %d s + %d us) = ", maxfd + 1, timeout.tv_sec, timeout.tv_usec);
       rc = select(maxfd + 1, &fdread, &fdwrite, &fdexcep, &timeout);
-      printf("%d\n", rc);
+      if (VERBOSE) printf("%d\n", rc);
     } while (rc == -1 && errno == EAGAIN);
     if (rc == -1)
     {

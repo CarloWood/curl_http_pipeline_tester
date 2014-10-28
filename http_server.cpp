@@ -36,13 +36,13 @@ using boost::asio::ip::tcp;
 char const* const reply =
     "HTTP/1.1 200 OK\r\n"
     "Keep-Alive: timeout=10 max=400\r\n"
-    "Content-Length: 32\r\n"
+    "Content-Length: %d\r\n"
     "Content-Type: text/html\r\n"
     "X-Connection: %d\r\n"
     "X-Request: %d\r\n"
     "X-Reply: %lu\r\n"
     "\r\n"
-    "<html><body>hello</body></html>\n";
+    "<html><body>%s</body></html>\n";
 
 char const* const reading_prefix = "    < ";
 char const* const writing_prefix = "    > ";
@@ -285,8 +285,11 @@ public:
 
     void queue_reply(void)
     {
+      char body[256];
+      int size = std::snprintf(body, sizeof body, "Reply %d on connection %d for request #%d", ++m_reply, m_instance, m_request);
+      assert(size < sizeof body);
       char buf[512];
-      int size = std::snprintf(buf, sizeof buf, reply, m_instance, m_request, ++m_reply);
+      size = std::snprintf(buf, sizeof buf, reply, strlen(body) + 27, m_instance, m_request, m_reply, body);
       assert(size < sizeof buf);
       m_request = 0;
       std::string reply_formatted(buf, size);
