@@ -7,9 +7,10 @@
 #include <errno.h>
 #include <curl/curl.h>
 
-// All easy handles are pre-prepared in advance.
-// This specifies the total number of requests / easy handles that the application will do in total.
-#define NRREQUESTS 32
+// The maximum number of requests in the pipeline.
+#define PIPELEN 4
+// This specifies the total number of requests (easy handles) that the application will do in total.
+#define NRREQUESTS (2 + 2 * PIPELEN)
 
 void print_time_prefix()
 {
@@ -31,7 +32,7 @@ void print_time_prefix()
     notfirst = 1;
   else
   {
-    static struct timeval mindiff = { 0, 50000 };
+    static struct timeval mindiff = { 0, 5000 };
     struct timeval diff;
     timersub(&tv, &last_tv, &diff);
     if (timercmp(&diff, &mindiff, >))
@@ -53,7 +54,7 @@ void add_next_handle(CURLM* multi_handle, CURL* handles[], int* added, int* runn
   printf("Request #%d    added [now running: %d]\n", *added, *running);
 }
 
-void process_results(CURLM* multi_handle, CURL* handles[], int* running)
+void process_results(CURLM* multi_handle, CURL* handles[], struct curl_slist* headers[], int* running)
 {
   CURLMsg* msg;
   int msgs_left;
@@ -61,11 +62,12 @@ void process_results(CURLM* multi_handle, CURL* handles[], int* running)
   {
     if (msg->msg == CURLMSG_DONE)
     {
+      CURL* easy = msg->easy_handle;
       // Find out which handle this message is about.
       int found = 0;
       for (int i = 0; i < NRREQUESTS; ++i)
       {
-	if (msg->easy_handle == handles[i])
+	if (easy == handles[i])
 	{
 	  found = i + 1;
 	  break;
@@ -86,6 +88,8 @@ void process_results(CURLM* multi_handle, CURL* handles[], int* running)
 	{
 	  printf("Request    #%d completed with status %d", found, msg->data.result);
 	}
+	// Clean up the headers.
+	curl_slist_free_all(headers[found - 1]);
 	--*running;
 	printf(" [now running: %d]\n", *running);
       }
@@ -93,6 +97,7 @@ void process_results(CURLM* multi_handle, CURL* handles[], int* running)
       {
 	printf("Got CURLMSG_DONE for a msg that matches none of our fds!");
       }
+      curl_easy_cleanup(easy);
     }
   }
 }
@@ -117,11 +122,11 @@ int main(void)
     curl_easy_setopt(handles[i], CURLOPT_STDERR, stdout);
     curl_easy_setopt(handles[i], CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(handles[i], CURLOPT_HTTPGET, 1L);
-    curl_easy_setopt(handles[i], CURLOPT_TIMEOUT, 4L);					// Timeout after 4 seconds.
+    curl_easy_setopt(handles[i], CURLOPT_TIMEOUT, (i == 3) ? 10L : 1L);					// Timeout after 1 seconds.
     curl_easy_setopt(handles[i], CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(handles[i], CURLOPT_URL, "http://localhost:9000/");
     // Construct the headers.
-    snprintf(header_buf, sizeof header_buf, "X-Sleep: %d", (i != 8) ? 500 : 5000);	// Server delays reply 0.5 seconds except for request #8, which will be 5 seconds delayed.
+    snprintf(header_buf, sizeof header_buf, "X-Sleep: %d", (i + 1 != 2) ? 100 : 1100);	// Server delays reply 0.1 seconds except for request #2, which will be 1.1 seconds delayed.
     if (i > 0)	// No delay for the first one, which is just to establish that the server supports http pipelining.
       headers[i] = curl_slist_append(headers[i], header_buf);
     snprintf(header_buf, sizeof header_buf, "X-Request: %d", i + 1);			// The requests are numbered 1 through NRREQUESTS.
@@ -144,7 +149,7 @@ int main(void)
   // that libcurl start to do pipelining for this url.
   int still_running;
   do { curl_multi_perform(multi_handle, &still_running); } while (still_running);
-  process_results(multi_handle, handles, &running);
+  process_results(multi_handle, handles, headers, &running);
 
   //==========================================================================================
   // THE REAL TEST STARTS HERE
@@ -152,8 +157,8 @@ int main(void)
   // Run until nothing is running anymore.
   for (;;)
   {
-    // Keep 6 requests in the pipeline, until we run out of easy handles.
-    for (int n = still_running; n < 6 && added < NRREQUESTS; ++n)
+    // Keep PIPELEN requests in the pipeline, until we run out of easy handles.
+    for (int n = still_running; n < PIPELEN && added < NRREQUESTS; ++n)
     {
       // Add the next (already prepared) easy handle.
       add_next_handle(multi_handle, handles, &added, &running);
@@ -164,13 +169,21 @@ int main(void)
     curl_multi_perform(multi_handle, &still_running);
     printf("still_running = %d\n", still_running);
 
-    // Print debug outout when anything finished, and update 'running'.
-    process_results(multi_handle, handles, &running);
+    // Print debug output when anything finished, and update 'running'.
+    process_results(multi_handle, handles, headers, &running);
 
     // Exit the main loop when we're done.
     if (running == 0 &&		// all done
 	added == NRREQUESTS)	// nothing else to add
       break;
+
+    // At this point we might have less than PIPELEN requests in the pipeline again
+    // because curl_multi_perform/process_results might have finished 1 or more.
+    // However, at this point is it possible that the select() call below will
+    // have a timeout and will sleep. We don't want that; so immediately refill the
+    // pipe.
+    if (still_running < PIPELEN && added < NRREQUESTS)
+      continue;
 
     // Obtain the next timeout by calling curl_multi_timeout().
     struct timeval timeout = { 1, 0 };
@@ -213,14 +226,6 @@ int main(void)
 
   //==========================================================================================
   // Clean up.
-
-  // Free the headers.
-  for (int i = 0; i < NRREQUESTS; ++i)
-    curl_slist_free_all(headers[i]);
-
-  // Free the CURL handles.
-  for (int i = 0; i < NRREQUESTS; ++i)
-    curl_easy_cleanup(handles[i]);
 
   // Clean up the multi handle.
   curl_multi_cleanup(multi_handle);
