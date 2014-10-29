@@ -36,11 +36,11 @@ using boost::asio::ip::tcp;
 char const* const reply =
     "HTTP/1.1 200 OK\r\n"
     "Keep-Alive: timeout=10 max=400\r\n"
-    "Content-Length: %d\r\n"
+    "Content-Length: %lu\r\n"
     "Content-Type: text/html\r\n"
     "X-Connection: %d\r\n"
-    "X-Request: %d\r\n"
-    "X-Reply: %lu\r\n"
+    "X-Request: %lu\r\n"
+    "X-Reply: %d\r\n"
     "\r\n"
     "<html><body>%s</body></html>\n";
 
@@ -286,7 +286,7 @@ public:
     void queue_reply(void)
     {
       char body[256];
-      int size = std::snprintf(body, sizeof body, "Reply %d on connection %d for request #%d", ++m_reply, m_instance, m_request);
+      int size = std::snprintf(body, sizeof body, "Reply %d on connection %d for request #%lu", ++m_reply, m_instance, m_request);
       assert(size < sizeof body);
       char buf[512];
       size = std::snprintf(buf, sizeof buf, reply, strlen(body) + 27, m_instance, m_request, m_reply, body);
@@ -361,7 +361,7 @@ public:
       nowtime = tv.tv_sec;
       nowtm = localtime(&nowtime);
       strftime(tmbuf, sizeof tmbuf, "%Y-%m-%d %H:%M:%S", nowtm);
-      snprintf(buf, sizeof buf, "%s.%06d: #%d: ", tmbuf, tv.tv_usec, m_instance);
+      snprintf(buf, sizeof buf, "%s.%06lu: #%d: ", tmbuf, tv.tv_usec, m_instance);
       return buf;
     }
 
