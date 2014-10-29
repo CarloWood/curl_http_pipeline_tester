@@ -11,7 +11,7 @@
 // is received, allowing to simulate HTTP pipelining.
 //
 // However, if the input contains a "X-Sleep: XXX" header then
-// the server will delay sending the reply for XXX miliseconds.
+// the server will delay sending the reply for XXX milliseconds.
 // If the input contains a "X-Request: XXX" header then that
 // is returned in the reply as-is. Furthermore the reply
 // contains a "X-Connection:" header that enumerates the connection
