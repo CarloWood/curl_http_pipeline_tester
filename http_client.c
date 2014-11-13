@@ -1,9 +1,11 @@
-#define _BSD_SOURCE
+#define _GNU_SOURCE
 #include <sys/time.h>	// timersub, timercmp
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <ctype.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <curl/curl.h>
 
@@ -89,6 +91,11 @@ void process_results(CURLM* multi_handle, CURL* handles[], struct curl_slist* he
 	else
 	{
 	  printf("Request    #%d completed with status %d", found, msg->data.result);
+	  if (msg->data.result == 7)
+	  {
+	    printf("\n\nERROR: connection refused. Are you sure the server is running?\n");
+	    exit(1);
+	  }
 	}
 	// Clean up the headers.
 	curl_slist_free_all(headers[found]);
@@ -104,12 +111,53 @@ void process_results(CURLM* multi_handle, CURL* handles[], struct curl_slist* he
   }
 }
 
-int main(void)
+void policy_callback(char const *hostname, int port, struct curl_pipeline_policy* policy, void *userp)
 {
+  printf("Calling policy_callback(%s:%d with max host connections = %lu, max pipelen = %ld and flags = %d\n",
+      hostname, port, policy->max_host_connections, policy->max_pipeline_length, policy->flags);
+  policy->flags = CURL_SUPPORTS_PIPELINING;
+}
+
+int main(int argc, char* argv[])
+{
+  char const* hostname = "localhost";
+  int port = 9001;
+  int c;
+
+  opterr = 0;
+
+  while ((c = getopt(argc, argv, "p:")) != -1)
+    switch (c)
+    {
+      case 'p':
+	port = atoi(optarg);
+	break;
+      case '?':
+	if (optopt == 'p')
+	  fprintf(stderr, "Option -%c requires an argument.\n", optopt);
+	else if (isprint(optopt))
+	  fprintf(stderr, "Unknown option `-%c'.\n", optopt);
+	else
+	  fprintf(stderr, "Unknown option character `\\x%x.\n", optopt);
+	return 1;
+      default:
+	abort();
+    }
+
+  if (optind < argc)
+  {
+    hostname = argv[optind];
+  }
+
+  char url[256];
+  snprintf(url, sizeof(url), "http://%s:%d/", hostname, port);
+  printf("Connecting to '%s'...\n", url);
+
   // Initialize the CURL multi handle.
   CURLM* multi_handle = curl_multi_init();
   curl_multi_setopt(multi_handle, CURLMOPT_PIPELINING, 1L);
   curl_multi_setopt(multi_handle, CURLMOPT_MAX_PIPELINE_LENGTH, (long)NRREQUESTS);
+  curl_multi_setopt(multi_handle, CURLMOPT_PIPELINE_POLICY_FUNCTION, &policy_callback);
 
   // Custom headers.
   struct curl_slist* headers[NRREQUESTS];
@@ -126,13 +174,18 @@ int main(void)
     curl_easy_setopt(handles[i], CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(handles[i], CURLOPT_TIMEOUT, (i == 3) ? 10L : 1L);					// Timeout after 1 seconds.
     curl_easy_setopt(handles[i], CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
-    curl_easy_setopt(handles[i], CURLOPT_URL, "http://localhost:9000/");
+    curl_easy_setopt(handles[i], CURLOPT_URL, url);
     // Construct the headers.
     snprintf(header_buf, sizeof header_buf, "X-Sleep: %d", (i != 1) ? 100 : 1100);	// Server delays reply 0.1 seconds except for request #1, which will be 1.1 seconds delayed.
     if (i > 0)	// No delay for the first one, which is just to establish that the server supports http pipelining.
       headers[i] = curl_slist_append(headers[i], header_buf);
     snprintf(header_buf, sizeof header_buf, "X-Request: %d", i);			// The requests are numbered 0 through NRREQUESTS - 1.
     headers[i] = curl_slist_append(headers[i], header_buf);
+    if (i == 7)
+    {
+      snprintf(header_buf, sizeof header_buf, "X-Disconnect: yes");
+      headers[i] = curl_slist_append(headers[i], header_buf);
+    }
     curl_easy_setopt(handles[i], CURLOPT_HTTPHEADER, headers[i]);
   }
 

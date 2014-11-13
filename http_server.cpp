@@ -4,7 +4,7 @@
 //
 // Then just run ./http_server
 //
-// The application will listen on port 9000 and accept
+// The application will listen on port 9001 and accept
 // any number of connections - each connection is
 // kept alive and a short text/html reply is sent
 // back to the client each time the pattern "\r\n\r\n"
@@ -390,9 +390,9 @@ void Reply::timed_out(boost::system::error_code const& error)
 class tcp_server
 {
   public:
-    tcp_server(boost::asio::io_service& io_service) : m_acceptor(io_service, tcp::endpoint(tcp::v4(), 9000)), m_count(0)
+    tcp_server(boost::asio::io_service& io_service) : m_acceptor(io_service, tcp::endpoint(tcp::v4(), 9001)), m_count(0)
     {
-      std::cout << "Listening on port 9000..." << std::endl;
+      std::cout << "Listening on port 9001..." << std::endl;
       m_acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
       start_accept();
     }
