@@ -4,6 +4,7 @@ DEFS = @DEFS@
 
 http_server_SOURCES = http_server.cpp
 http_server_LDADD = -lboost_system
+http_server_LDFLAGS = -pthread
 
 http_client_SOURCES = http_client.c
 http_client_CFLAGS = -std=c11 $(LIBCURL_CFLAGS)

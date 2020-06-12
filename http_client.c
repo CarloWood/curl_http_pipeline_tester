@@ -9,6 +9,8 @@
 #include <errno.h>
 #include <curl/curl.h>
 
+#ifdef CURL_SUPPORTS_PIPELINING
+
 // The maximum number of requests in the pipeline.
 int const PIPELEN = 4;
 // This specifies the total number of requests (easy handles) that the application will do in total.
@@ -287,3 +289,14 @@ int main(int argc, char* argv[])
 
   return 0;
 }
+
+#else // CURL_SUPPORTS_PIPELINING
+
+int main()
+{
+  printf("https://github.com/CarloWood/curl is required for this test application to compile. "
+      "The fixes added to that repository never made it to upstream "
+      "(lame maintainer(s) with \"no time\" to review Real Patches that fix serious bugs).\n");
+}
+
+#endif // CURL_SUPPORTS_PIPELINING

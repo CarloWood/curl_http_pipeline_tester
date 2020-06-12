@@ -30,8 +30,15 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/asio.hpp>
+#include <boost/array.hpp>
 
 using boost::asio::ip::tcp;
+
+#if BOOST_VERSION >= 107000
+#define GET_IO_SERVICE(s) ((boost::asio::io_context&)(s).get_executor().context())
+#else
+#define GET_IO_SERVICE(s) ((s).get_io_service())
+#endif
 
 char const* const reply =
     "HTTP/1.1 200 OK\r\n"
@@ -51,9 +58,9 @@ class parser
 {
   public:
     parser(std::string const& str) : m_str(str) { reset(); }
-    void reset(void) { m_match = false; m_ptr = m_str.begin(); }
+    void reset() { m_match = false; m_ptr = m_str.begin(); }
 
-    operator bool(void) const { return m_match; }
+    operator bool() const { return m_match; }
     void feed(char c);
 
   private:
@@ -79,14 +86,14 @@ class header
   public:
     enum state_type { s_begin, s_key, s_colon, s_value, s_carriage_return, s_matched };
 
-    header(void) { reset(); }
-    void reset(void) { m_key.clear(); m_value.clear(); m_state = s_begin; m_error = false; }
+    header() { reset(); }
+    void reset() { m_key.clear(); m_value.clear(); m_state = s_begin; m_error = false; }
 
-    operator bool(void) const { return m_state == s_matched; }
+    operator bool() const { return m_state == s_matched; }
     void feed(char c);
 
-    std::string const& key(void) const { return m_key; }
-    std::string const& value(void) const { return m_value; }
+    std::string const& key() const { return m_key; }
+    std::string const& value() const { return m_value; }
 
   private:
     std::string m_key;
@@ -153,9 +160,9 @@ class Reply
   public:
     Reply(boost::asio::io_service& io_service, boost::shared_ptr<tcp_connection> const& connection, char const* s, size_t l) : m_timer(new boost::asio::deadline_timer(io_service)), m_str(s, l), m_sleep(0), m_connection(connection) { }
     void set_sleeping(unsigned long sleep);
-    bool is_sleeping(void) const { return m_sleep != 0; }
-    void wakeup(void) { if (is_sleeping()) { m_sleep = 0; m_timer.reset(); } }
-    std::string const& str(void) const { return m_str; }
+    bool is_sleeping() const { return m_sleep != 0; }
+    void wakeup() { if (is_sleeping()) { m_sleep = 0; m_timer.reset(); } }
+    std::string const& str() const { return m_str; }
     void timed_out(boost::system::error_code const& error);
 
   private:
@@ -283,7 +290,7 @@ public:
 	std::cout << prefix() << "Error " << e << " writing data." << std::endl;
     }
 
-    void queue_reply(void)
+    void queue_reply()
     {
       char body[256];
       int size = std::snprintf(body, sizeof body, "Reply %d on connection %d for request #%lu", ++m_reply, m_instance, m_request);
@@ -293,7 +300,7 @@ public:
       assert(size < sizeof buf);
       m_request = 0;
       std::string reply_formatted(buf, size);
-      m_reply_queue.push_back(Reply(m_socket.get_io_service(), shared_from_this(), buf, size));
+      m_reply_queue.push_back(Reply(GET_IO_SERVICE(m_socket), shared_from_this(), buf, size));
       if (m_sleep)
       {
 	Reply* rp = &m_reply_queue.back();
@@ -303,7 +310,7 @@ public:
     }
 
   public:
-    void process_replies(void)
+    void process_replies()
     {
       if (m_closed)
 	return;
@@ -350,7 +357,7 @@ public:
       }
     }
 
-    std::string prefix(void) const
+    std::string prefix() const
     {
       struct timeval tv;
       time_t nowtime;
@@ -400,7 +407,7 @@ class tcp_server
   private:
     void start_accept()
     {
-      tcp_connection::pointer new_connection = tcp_connection::create(m_acceptor.get_io_service(), ++m_count);
+      tcp_connection::pointer new_connection = tcp_connection::create(GET_IO_SERVICE(m_acceptor), ++m_count);
       m_acceptor.async_accept(new_connection->socket(), boost::bind(&tcp_server::handle_accept, this, new_connection, boost::asio::placeholders::error));
     }
 
